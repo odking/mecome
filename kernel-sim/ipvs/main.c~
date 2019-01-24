@@ -1,0 +1,209 @@
+#include "ipvs.h"
+#include "ipvs_ctl.h"
+#include <assert.h>
+#include <string.h>
+
+#define DEFAULT_WEIGHT 63 * 100
+
+#define NUM_PAYLOADS    15
+
+#define INIT_CONN 180000*NUM_PAYLOADS
+#define FIRST_CONN 186000*NUM_PAYLOADS   /*weight 97*/
+#define SECOND_CONN 196200*NUM_PAYLOADS /*w 96*/
+
+#define THIRD_CONN 210000*NUM_PAYLOADS /*w 91*/
+
+#define FOUR_CONN 30000 /*add 30K*/
+#define FIVE_CONN 120000 /*add 30K*/
+#define TOTAL_CONN 300000
+
+#define LOAD(x) (100*(float)(x)/TOTAL_CONN)
+#define NEW_THR(x) (int)(100 - ((x-30)*97/60))
+
+int scheds_g = NUM_SCHEDULERS;
+int removed_pn = -1;
+
+struct ip_vs_pn
+{
+    int nodeid;
+    int addr;
+    int port;
+    int weight;
+    int throttle;
+    int users;
+};
+
+struct ip_vs_pn pns[NUM_PAYLOADS] = {0};
+
+void update_weight(struct ip_vs_pn* pn)
+{
+    int thr;
+    int load  = LOAD(pn->users);
+    if (load <= 30)
+    {
+        thr = 100;
+    }
+    else if (load >= 90)
+    {
+        thr = 3;
+    }
+    else
+    {
+        thr = NEW_THR(load);
+    }
+
+    if (thr == pn->throttle)
+        return;
+    else
+    {
+        update_dest(NUM_SCHEDULERS, pn->addr, pn->port, thr * pn->weight);
+        pn->throttle = thr;
+    }
+}
+void add_pns()
+{
+    for (int i = 0; i < NUM_PAYLOADS; i++)
+    {
+        pns[i].nodeid = i;
+        pns[i].addr = i+1000;
+        pns[i].port = i+1000;
+        pns[i].users = 0;
+        pns[i].weight = 63;
+        pns[i].throttle = 100;
+        add_dest(NUM_SCHEDULERS, pns[i].addr, pns[i].port, DEFAULT_WEIGHT);
+    }
+}
+
+void remove_pn(int id)
+{
+    printf("remove pn:%d\n", id);
+    delete_dest(NUM_SCHEDULERS, 2*id, pns[id].addr, pns[id].port);
+    scheds_g = NUM_SCHEDULERS -2;
+    memset((void*)&pns[id], 0, sizeof(struct ip_vs_pn));
+    removed_pn = id;
+}
+
+void add_pn(int id)
+{
+    printf("add pn:%d\n", id);
+    add_service(2*id);
+
+    scheds_g += 2;
+    pns[id].nodeid = id;
+    pns[id].addr = id+1000;
+    pns[id].port = id+1000;
+    pns[id].users = 0;
+    pns[id].weight = 63;
+    pns[id].throttle = 100;
+
+    //add dest to all schedulers
+    add_dest(scheds_g, pns[id].addr ,pns[id].port, DEFAULT_WEIGHT);
+
+    //add other dests to current shedulers on this pn pair
+    for (int i = 0; i < NUM_PAYLOADS; i++)
+    {
+        if (i != id)
+        {
+            add_dests(2*id, pns[i].addr, pns[i].port, pns[i].weight*pns[i].throttle);
+            add_dests(2*id+1, pns[i].addr, pns[i].port, pns[i].weight*pns[i].throttle);
+        }
+    }
+}
+
+struct ip_vs_pn* find_pn(int addr ,int port)
+{
+    for (int i = 0; i < NUM_PAYLOADS; i++)
+        if (pns[i].addr == addr && pns[i].port == port)
+            return &pns[i];
+    return NULL;
+}
+
+void print_pn()
+{
+    for (int i = 0; i < NUM_PAYLOADS; i++)
+    {
+        printf("pn node%d, addr %d, port %d, thr %d, users %d\n", pns[i].nodeid,
+                pns[i].addr, pns[i].port, pns[i].throttle, pns[i].users);
+    }
+}
+ 
+
+void start_initial_load(int conns)
+{
+    DBG_FUN;
+    int initial_conns = conns;
+    for (int i = 0; i < initial_conns; i++)
+    {
+        struct ip_vs_dest* dest = load(NUM_SCHEDULERS);
+        struct ip_vs_pn *pn = find_pn(dest->addr, dest->port);
+        assert(pn != NULL);
+        pn->users++;
+        update_weight(pn);
+    }
+
+    print_pn();
+}
+
+void add_load(int cns, int scheds)
+{
+    DBG_FUN;
+    int conns = cns ;
+    for (int i = 0; i < conns; i++)
+    {
+        struct ip_vs_dest* dest = load(scheds);
+        struct ip_vs_pn *pn = find_pn(dest->addr, dest->port);
+        assert(pn != NULL);
+        pn->users++;
+        update_weight(pn);
+    }
+
+    print_pn();
+}
+
+void main(int argc, char ** argv)
+{
+    char c = 0;
+    struct ip_vs_dest *dest = NULL;
+    struct ip_vs_service *svc = NULL;
+
+    add_schedulers(NUM_SCHEDULERS);
+    add_services(NUM_SCHEDULERS);
+    add_pns();
+
+    start_initial_load(INIT_CONN);
+
+    printf("*****************186000 load thr:97************\n");
+
+    add_load(FIRST_CONN - INIT_CONN, NUM_SCHEDULERS);
+
+    printf("*****************196000 load thr96************\n");
+    add_load(SECOND_CONN - FIRST_CONN, NUM_SCHEDULERS);
+
+    printf("*****************lock pn pair 7************\n");
+    /*rmv node*/
+    remove_pn(7);
+
+//    view_dests(NUM_SCHEDULERS);
+
+    printf("*****************210000 load************\n");
+    add_load((THIRD_CONN - SECOND_CONN)/14 * 13, NUM_SCHEDULERS);
+
+    /*add nodes*/
+    printf("****************unlock pn pair 7 ************\n");
+    add_pn(7);
+
+//   view_dests(NUM_SCHEDULERS);
+
+
+    printf("*****************+30K load************\n");
+   add_load(FOUR_CONN, NUM_SCHEDULERS);
+
+    printf("*****************+120K load************\n");
+   add_load(FIVE_CONN, NUM_SCHEDULERS);
+
+    printf("*****************+40*120K load************\n");
+   add_load(9*FIVE_CONN, NUM_SCHEDULERS);
+
+}
+
+
