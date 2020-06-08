@@ -1,0 +1,15 @@
+
+CC=gcc -W -Wall
+target=test
+includes=$(shell find ./ -name "*.h")
+src=$(shell find ./ -name "*.c")
+obj=$(src:%.c=%.o)
+
+%.o: %.c $(includes)
+	$(CC) -c $<
+
+$(target): $(obj)
+	$(CC) -o $@ $^
+
+clean:
+	rm -rf $(obj)  $(target)
