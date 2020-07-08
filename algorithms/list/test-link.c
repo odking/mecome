@@ -16,6 +16,7 @@
  * =====================================================================================
  */
 #include "link-list.h"
+#include "list-to-bst.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -70,5 +71,10 @@ int main()
     printf("revert a list\n");
     p = revert(p);
     printList(p);
+
+    printf("list to bst\n");
+    printList(p);
+    sortedListToBST(p);
+
     return 0;
 }

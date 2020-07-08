@@ -11,4 +11,4 @@ all: $(obj)
 	$(CC) --std=c++11 -o $@ $^
 
 clean:
-	rm -rf $(obj)  all
+	rm -rf *.o  all

@@ -5,10 +5,10 @@ src=$(shell find ./ -name "*.c")
 obj=$(src:%.c=%.o)
 
 %.o: %.c $(includes)
-	$(CC) -c $<
+	$(CC) -g -c $<
 
 all: $(obj)
-	$(CC) -o $@ $^
+	$(CC) -g -o $@ $^
 
 clean:
 	rm -rf $(obj)  link-test

@@ -1,0 +1,54 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  clone.c
+ *
+ *    Description:  
+ *
+ *        Version:  1.0
+ *        Created:  07/02/2020 01:35:02 AM
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  Jinqing Yan (), 
+ *   Organization:  
+ *
+ * =====================================================================================
+ */
+#define _GNU_SOURCE
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <sched.h>
+#include <signal.h>
+#include <unistd.h>
+
+#define STACK_SIZE (1024 * 1024)
+static char container_stack[STACK_SIZE];
+
+char* const container_args[] = {
+    "/bin/bash",
+   NULL
+};
+
+int container_main(void* arg)
+{
+    printf("Container - inside the container!\n");
+    int fd = open("/var/run/netns/ns_test2", O_RDONLY);
+    setns(fd, 0);
+    execv(container_args[0], container_args);
+    printf("Something's wrong!\n");
+    return 1;
+}
+
+int main()
+{
+    printf("Parent - start a container!\n");
+    int container_pid = clone(container_main, container_stack+STACK_SIZE, SIGCHLD|CLONE_NEWNET, NULL);
+    waitpid(container_pid, NULL, 0);
+    printf("Parent - container stopped!\n");
+    return 0;
+}
+
+
